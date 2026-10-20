@@ -10,12 +10,16 @@
 
 **Spec:** `docs/superpowers/specs/2026-10-20-vigilex-umbrella-design.md` (step 1 of §12).
 
+**Branch:** `step1/foundations`, created from `spec/umbrella-design`; the PR targets `main` (and so also carries the spec and plan commits).
+
 ## Global Constraints
 
 - Python `>=3.12,<3.13`; every package is a uv workspace member under `packages/`.
 - Region `eu-central-1`; embedding model id default `cohere.embed-multilingual-v3`; embedding dimension 1024.
 - Database: Postgres 16 + pgvector (`pgvector/pgvector:pg16` locally and in CI).
-- Tests never call Bedrock. `VIGILEX_LLM=fake` selects fakes; it is the only test-specific setting.
+- Tests never call Bedrock. `VIGILEX_LLM=fake` selects fakes; the Makefile's test targets set it.
+- Integration tests need `VIGILEX_TEST_SERVER_URL`: a URL to any database on the test server (e.g. `.../postgres`), **not** the test database itself. The fixture drops and recreates `vigilex_test` on that server; without the variable, integration tests skip.
+- Ruff is pinned to `0.17.1`, in both the dev group and pre-commit. The code blocks below are not ruff-formatted: run `uv run ruff format . && uv run ruff check --fix .` before every lint check. Every remaining `zip()` already has an explicit `strict=`.
 - Dataset: `jurifindit/JuriFindIT` on Hugging Face, pinned revision `d765a61998a0dc962a9c06394ab546b5a5ee0aa5`, license CC BY-NC-SA 4.0.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
@@ -28,13 +32,16 @@
 - Bedrock's Cohere embed accepts at most 2048 characters per text: chunking is by characters (max 1800, overlap 200), hard-splitting any single token longer than that (the corpus has a 1.1M-character table article).
 - Cache key is `sha256(model_id \0 input_type \0 text)`: query and document embeddings of the same text differ.
 - Migrations: ~20-line plain-SQL runner instead of Alembic (no SQLAlchemy in the stack; psycopg is used directly). `eval_runs` and `session_quota` arrive with steps 2 and 3 as new migration files.
-- Seed subset: the 37 `validation`-split AML + privacy questions, their 432 gold articles, up to 500 sampled one-hop neighbors, up to 1000 sampled distractors from the same acts (≈1.9k articles).
+- Seed subset: the 37 `validation`-split AML + privacy questions, their 432 gold articles, up to 500 sampled one-hop neighbors, up to 1000 sampled distractors from the same acts (1,932 articles, ≈11 MB: 2.2 MB corpus + 8.7 MB embeddings).
+- One-hop means **outgoing** references only (articles a gold article cites: 1,164 candidates). The 253 articles that only cite gold articles are not added; revisit in step 5 if incoming-reference demos need them.
+- Seed and full load replace `vigilex ingest --subset` with `vigilex build-seed` / `vigilex load-seed`.
+- Ingestion merges: rows upsert and each article's chunks are replaced, but articles, refs, questions and qrels missing from a newer release are never deleted. To get an exact mirror, recreate the database (`docker compose down -v`).
 - `docker-compose.yml` has only `db` in this step; the API service arrives with step 3.
 
 ## Review Focus
 
 1. **Giant article** (1.1M chars, one token > 2047 chars): chunker hard-splits the token, ingestion succeeds. Tests: Task 3 `test_giant_token_is_split`, Task 6 `test_ingest_survives_giant_token`.
-2. **Fake vectors leaking into the real cache:** running with `VIGILEX_LLM=fake` must never write to `embedding_cache`. Test: Task 4 `test_store_false_never_writes`.
+2. **Fake vectors leaking into the real cache:** running with `VIGILEX_LLM=fake` must never write to `embedding_cache`. Tests: Task 4 `test_fake_mode_never_stores` (wiring) and `test_store_false_never_writes` (mechanism).
 3. **Re-running ingestion** (after a crash or twice): no duplicate rows, same counts. Test: Task 6 `test_ingest_is_idempotent`.
 4. **Article text changed between runs:** stale chunks (higher `ord`) disappear. Test: Task 6 `test_reingest_replaces_stale_chunks`.
 5. **Relevant ids pointing at missing/skipped articles:** dropped from qrels, and a question left with none is skipped instead of failing on the FK. Test: Task 5 `test_dangling_relevant_ids`.
@@ -99,7 +106,7 @@ vigilex-core = { workspace = true }
 vigilex-rag = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff>=0.7", "pyright>=1.1.390", "pre-commit>=4.0"]
+dev = ["pytest>=8.3", "ruff==0.17.1", "pyright>=1.1.390", "pre-commit>=4.0"]
 
 [tool.ruff]
 line-length = 100
@@ -123,7 +130,7 @@ testpaths = ["tests"]
 name = "vigilex-core"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = ["psycopg[binary]>=3.2", "pgvector>=0.3.6", "numpy>=2.0", "boto3>=1.35"]
+dependencies = ["psycopg[binary]>=3.2", "pgvector>=0.5", "numpy>=2.0", "boto3>=1.35"]
 
 [build-system]
 requires = ["hatchling"]
@@ -161,14 +168,14 @@ Both `__init__.py` files are empty.
 ```yaml
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.7.4
+    rev: v0.17.1  # keep equal to the ruff pin in pyproject.toml
     hooks:
       - id: ruff
         args: [--fix]
       - id: ruff-format
 ```
 
-Note: `vigilex_rag.cli` does not exist until Task 6; the script entry is harmless until then.
+Note: `vigilex_rag.cli` does not exist until Task 6; the script entry is harmless until then. Run `uv run pre-commit install` once after `uv sync`.
 
 - [ ] **Step 2: Write the failing test** — `tests/unit/test_settings.py`
 
@@ -233,10 +240,15 @@ class Settings:
 
 - [ ] **Step 5: Run tests and tooling**
 
-Run: `uv run pytest tests/unit -v && uv run ruff check . && uv run ruff format --check . && uv run pyright`
+Run: `uv run ruff format . && uv run ruff check --fix . && uv run pytest tests/unit -v && uv run ruff format --check . && uv run pyright`
 Expected: 2 passed; ruff and pyright report no errors.
 
-- [ ] **Step 6: Update the spec** with the "Spec deltas" list above (rewrite the §2.1 table rows for `articles`, `questions`; replace "Alembic with plain SQL" with the plain-SQL runner; §2.2 chunking by characters and cache key; §2.3 seed numbers).
+- [ ] **Step 6: Update the spec** with the "Spec deltas" list above:
+  - §2.1: rewrite the table rows for `articles`, `questions`, `embedding_cache` (key); replace "Alembic with plain SQL" with the plain-SQL runner.
+  - §2.2: `--subset` becomes `build-seed` / `load-seed`; chunking by characters; ingestion merges, never deletes.
+  - §2.3: 37 questions, 1,932 articles, outgoing one-hop only, ≈11 MB.
+  - §3: the layout comment `migrations/ # Alembic` becomes `# plain SQL`.
+  - §13: mark the JuriFindIT license and format item as verified; the Bedrock and Aurora items are filled in at Task 7 step 6.
 
 - [ ] **Step 7: Commit**
 
@@ -280,7 +292,7 @@ volumes:
 ```
 
 Run: `docker compose up -d --wait db`
-Expected: `Container vigilex-db-1 Healthy`
+Expected: the `db` container reports `Healthy`. Its name prefix is the checkout directory, so in a worktree it differs. Port 5432 must be free: stop any other compose stack first.
 
 - [ ] **Step 2: Integration fixtures** — `tests/integration/conftest.py`
 
@@ -301,9 +313,9 @@ TABLES = "articles, article_refs, article_chunks, questions, qrels, embedding_ca
 
 @pytest.fixture(scope="session")
 def db_url() -> str:
-    server = os.environ.get("VIGILEX_TEST_DATABASE_URL")
+    server = os.environ.get("VIGILEX_TEST_SERVER_URL")
     if not server:
-        pytest.skip("VIGILEX_TEST_DATABASE_URL not set")
+        pytest.skip("VIGILEX_TEST_SERVER_URL not set")
     with psycopg.connect(server, autocommit=True) as c:
         c.execute(f"DROP DATABASE IF EXISTS {TEST_DB} WITH (FORCE)")
         c.execute(f"CREATE DATABASE {TEST_DB}")
@@ -347,14 +359,15 @@ def test_italian_stemming_matches_inflections(conn):
 
 def test_vector_index_exists(conn):
     idx = conn.execute(
-        "SELECT indexdef FROM pg_indexes WHERE tablename = 'article_chunks' AND indexdef LIKE '%hnsw%'"
+        "SELECT indexdef FROM pg_indexes "
+        "WHERE tablename = 'article_chunks' AND indexdef LIKE '%hnsw%'"
     ).fetchall()
     assert len(idx) == 1
 ```
 
 - [ ] **Step 4: Run it to verify it fails**
 
-Run: `VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration/test_migrate.py -v`
+Run: `VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration/test_migrate.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'vigilex_core.db'`
 
 - [ ] **Step 5: Schema** — `migrations/0001_init.sql`
@@ -449,7 +462,7 @@ def connect(url: str) -> psycopg.Connection:
 
 - [ ] **Step 7: Run tests**
 
-Run: `VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration -v && uv run pyright`
+Run: `VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration -v && uv run pyright`
 Expected: 3 passed; pyright clean.
 
 - [ ] **Step 8: Commit**
@@ -491,7 +504,7 @@ def test_long_text_chunks_are_bounded_overlapping_and_complete():
     words = [f"parola{i}" for i in range(2000)]
     chunks = chunk_text(" ".join(words), max_chars=200, overlap=50)
     assert all(len(c) <= 200 for c in chunks)
-    for a, b in zip(chunks, chunks[1:]):
+    for a, b in zip(chunks, chunks[1:], strict=False):
         assert a.split()[-1] in b.split()  # consecutive chunks overlap
     seen = {w for c in chunks for w in c.split()}
     assert seen == set(words)
@@ -581,7 +594,8 @@ import io
 import json
 import math
 
-from vigilex_core.embeddings import EMBED_DIM, BedrockEmbedder, FakeEmbedder
+from vigilex_core.embeddings import EMBED_DIM, BedrockEmbedder, FakeEmbedder, make_embedder
+from vigilex_core.settings import Settings
 
 
 class StubBedrock:
@@ -617,6 +631,12 @@ def test_fake_embedder_is_deterministic_unit_norm_and_input_type_aware():
     assert a == b and a != c
     assert len(a) == EMBED_DIM
     assert math.isclose(math.sqrt(sum(x * x for x in a)), 1.0, rel_tol=1e-9)
+
+
+def test_fake_mode_never_stores():
+    s = Settings("postgresql://unused", "fake", "eu-central-1", "cohere.embed-multilingual-v3")
+    cached = make_embedder(s, None)  # fake mode never touches conn at construction
+    assert cached.store is False and isinstance(cached.inner, FakeEmbedder)
 ```
 
 - [ ] **Step 2: Write the failing integration tests** — `tests/integration/test_cache.py`
@@ -676,7 +696,7 @@ def test_store_false_still_reads_hits(conn):
 
 - [ ] **Step 3: Run them to verify they fail**
 
-Run: `uv run pytest tests/unit/test_embeddings.py -v; VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration/test_cache.py -v`
+Run: `uv run pytest tests/unit/test_embeddings.py -v; VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration/test_cache.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'vigilex_core.embeddings'`
 
 - [ ] **Step 4: Implement** — `packages/core/src/vigilex_core/embeddings.py`
@@ -754,10 +774,12 @@ class CachedEmbedder:
         rows = self.conn.execute(
             "SELECT key, embedding FROM embedding_cache WHERE key = ANY(%s)", (list(set(keys)),)
         ).fetchall()
-        found: dict[str, list[float]] = {k: e.tolist() for k, e in rows}
-        missing = {k: t for k, t in zip(keys, texts) if k not in found}
+        found: dict[str, list[float]] = {k: e.to_list() for k, e in rows}
+        missing = {k: t for k, t in zip(keys, texts, strict=True) if k not in found}
         if missing:
-            fresh = dict(zip(missing, self.inner.embed(list(missing.values()), input_type)))
+            fresh = dict(
+                zip(missing, self.inner.embed(list(missing.values()), input_type), strict=True)
+            )
             if self.store:
                 with self.conn.cursor() as cur:
                     cur.executemany(
@@ -786,7 +808,7 @@ def make_embedder(settings: Settings, conn: psycopg.Connection) -> CachedEmbedde
 
 - [ ] **Step 5: Run tests**
 
-Run: `uv run pytest tests/unit -v && VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration -v && uv run pyright`
+Run: `uv run pytest tests/unit -v && VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration -v && uv run pyright`
 Expected: all pass; pyright clean.
 
 - [ ] **Step 6: Commit**
@@ -804,6 +826,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 **Files:**
 - Create: `packages/rag/src/vigilex_rag/release.py`, `tests/helpers.py`, `tests/conftest.py`
+- Modify: `pyproject.toml` (pytest `pythonpath`)
 - Test: `tests/unit/test_release.py`
 
 **Interfaces:**
@@ -1065,7 +1088,7 @@ def test_empty_article_is_kept_without_chunks(conn, tmp_path, write_release):
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration/test_ingest.py -v`
+Run: `VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests/integration/test_ingest.py -v`
 Expected: FAIL with `ModuleNotFoundError: No module named 'vigilex_rag.ingest'`
 
 - [ ] **Step 3: Implement** — `packages/rag/src/vigilex_rag/ingest.py`
@@ -1130,7 +1153,7 @@ def ingest(conn: psycopg.Connection, release: Release, embedder: Embedder) -> In
             cur.executemany(
                 "INSERT INTO article_chunks (article_id, ord, text, embedding) "
                 "VALUES (%s, %s, %s, %s)",
-                [(aid, j, c, np.asarray(v, dtype=np.float32)) for (aid, j, c), v in zip(rows, vectors)],
+                [(aid, j, c, np.asarray(v, dtype=np.float32)) for (aid, j, c), v in zip(rows, vectors, strict=True)],
             )
         conn.commit()  # a crash loses at most one batch; embeddings already paid stay cached
         n_chunks += len(rows)
@@ -1178,7 +1201,7 @@ def main(argv: list[str] | None = None) -> None:
 
 - [ ] **Step 4: Run tests**
 
-Run: `VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests -v && uv run pyright`
+Run: `VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres uv run pytest tests -v && uv run pyright`
 Expected: all pass.
 
 - [ ] **Step 5: Smoke the CLI against compose**
@@ -1208,7 +1231,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - Consumes: `Release`, `load_release` (Task 5), `chunk_text` (Task 3), `Embedder`, `cache_key` (Task 4), `ingest` (Task 6).
 - Produces (in `vigilex_rag.seed`):
   - `select_seed(release: Release, rng: random.Random) -> Release`
-  - `write_seed(release: Release, out: Path, embedder: Embedder, model_id: str) -> None` — writes `corpus.parquet`, `validation.parquet` (with `id` column), `embeddings.parquet` (`key: string`, `embedding: list<float16>`) covering every chunk (`search_document`) and question (`search_query`)
+  - `write_seed(release: Release, out: Path, embedder: Embedder, model_id: str) -> None` — writes `corpus.parquet`, `validation.parquet` (with `id` column), `embeddings.parquet` (`key: string`, `embedding: fixed_size_list<float16, 1024>`) covering every chunk (`search_document`) and question (`search_query`)
   - `load_seed(conn, seed_dir: Path, embedder: Embedder) -> IngestStats` — loads `embeddings.parquet` into `embedding_cache` then ingests
   - Constants `SEED_DOMAINS = ("Antiriciclaggio e Antiterrorismo", "Privacy")`, `HOP_SAMPLE = 500`, `DISTRACTOR_SAMPLE = 1000`, `DISTRACTOR_MAX_CHARS = 12000`
 
@@ -1381,7 +1404,7 @@ def load_seed(conn: psycopg.Connection, seed_dir: Path, embedder: Embedder) -> I
     with conn.cursor() as cur:
         cur.executemany(
             "INSERT INTO embedding_cache (key, embedding) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            list(zip(keys, emb)),
+            list(zip(keys, emb, strict=True)),
         )
     conn.commit()
     return ingest(conn, load_release(seed_dir), embedder)
@@ -1413,6 +1436,8 @@ Expected: all pass (`test_seed_data.py` is integration; it runs after step 6).
 
 - [ ] **Step 6: HUMAN STEP — build the seed with real Bedrock** (one-off, costs cents)
 
+**Agent:** write the Makefile and `.gitignore` change below, then **stop** and hand the human the "Run" block. Do not commit yet. Resume at step 7 once the human confirms `data/seed/` exists; the agent commits it in step 9.
+
 `Makefile` (create now; Task 8 adds more targets):
 ```makefile
 REV := d765a61998a0dc962a9c06394ab546b5a5ee0aa5
@@ -1434,19 +1459,22 @@ build-seed: download
 
 Add `data/raw/` to `.gitignore`.
 
-Run (human, with AWS credentials):
+Run (human; credentials as in spec §10, i.e. `AWS_PROFILE` set to a profile with Bedrock access in eu-central-1):
 ```bash
-aws login
 uv run vigilex check-bedrock          # expect: ok: cohere.embed-multilingual-v3 in eu-central-1 returned 1024 dims
-make build-seed                        # expect: seed: ~1900 articles, 37 questions -> data/seed
-du -sh data/seed                       # expect: well under 50M
+make build-seed                        # expect: seed: 1932 articles, 37 questions -> data/seed
+du -sh data/seed                       # expect: about 11M
 ```
 If `check-bedrock` fails with `AccessDeniedException`, enable the Cohere Embed Multilingual model in the Bedrock console (eu-central-1 → Model access) and retry. Also run, for spec §13:
 ```bash
 aws bedrock list-foundation-models --region eu-central-1 --query "modelSummaries[?contains(modelId,'cohere')].modelId"
 aws bedrock list-inference-profiles --region eu-central-1 --query "inferenceProfileSummaries[?contains(inferenceProfileId,'anthropic')].inferenceProfileId"
 ```
-and paste the output into the PR description for step 2.
+and, for Aurora scale-to-zero (minimum 0 ACU), the PostgreSQL 16 minor versions available:
+```bash
+aws rds describe-db-engine-versions --engine aurora-postgresql --region eu-central-1 --query "DBEngineVersions[?starts_with(EngineVersion,'16.')].EngineVersion"
+```
+Write the results into spec §13 (which Cohere/Claude ids are available; which 16.x minor to use, checked against the AWS docs on scaling to zero ACUs). The agent commits that with step 9.
 
 - [ ] **Step 7: License files**
 
@@ -1469,13 +1497,13 @@ The code in this repository is licensed separately.
 
 - [ ] **Step 8: Run the integration test with the committed seed**
 
-Run: `VIGILEX_TEST_DATABASE_URL=postgresql://vigilex:vigilex@localhost:5432/postgres VIGILEX_LLM=fake uv run pytest tests/integration -v`
+Run: `VIGILEX_TEST_SERVER_URL=postgresql://vigilex:vigilex@localhost:5432/postgres VIGILEX_LLM=fake uv run pytest tests/integration -v`
 Expected: all pass, including `test_committed_seed_loads_without_embedding_calls`.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add packages/rag Makefile .gitignore data tests/unit/test_seed.py tests/integration/test_seed_data.py
+git add packages/rag Makefile .gitignore data tests/unit/test_seed.py tests/integration/test_seed_data.py docs/superpowers/specs
 git commit -m "feat: JuriFindIT seed subset with cached embeddings
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
@@ -1486,7 +1514,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ### Task 8: Developer workflow, CI, docs
 
 **Files:**
-- Modify: `Makefile`, `README.md`, `CLAUDE.md`
+- Modify: `Makefile`, `README.md`, `CLAUDE.md` (untracked in the main checkout: if it is missing in a worktree, copy it from the main checkout first)
 - Create: `.github/workflows/ci.yml`
 
 **Interfaces:**
@@ -1496,7 +1524,9 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 1: Extend the Makefile** (append; keep Task 7 targets)
 
 ```makefile
-export VIGILEX_TEST_DATABASE_URL ?= postgresql://vigilex:vigilex@localhost:5432/postgres
+.DEFAULT_GOAL := test  # otherwise bare `make` runs the dataset download (first target above)
+export VIGILEX_TEST_SERVER_URL ?= postgresql://vigilex:vigilex@localhost:5432/postgres
+test-unit test-integration: export VIGILEX_LLM := fake
 
 up:
 	docker compose up -d --wait db
@@ -1529,8 +1559,8 @@ fmt:
 
 - [ ] **Step 2: Verify the fresh-clone flow**
 
-Run: `docker compose down -v && make up && make seed && make lint && VIGILEX_LLM=fake make test`
-Expected: seed prints `IngestStats(articles=~1900, ..., questions=37, ...)` without any AWS credentials needed; lint clean; all tests pass.
+Run: `docker compose down -v && make up && make seed && make lint && make test`
+Expected: seed prints `IngestStats(articles=1932, ..., questions=37, ...)` without any AWS credentials needed; lint clean; all tests pass.
 
 - [ ] **Step 3: CI workflow** — `.github/workflows/ci.yml`
 
@@ -1557,7 +1587,7 @@ jobs:
           --health-interval 2s
           --health-retries 15
     env:
-      VIGILEX_TEST_DATABASE_URL: postgresql://vigilex:vigilex@localhost:5432/postgres
+      VIGILEX_TEST_SERVER_URL: postgresql://vigilex:vigilex@localhost:5432/postgres
       VIGILEX_LLM: fake
     steps:
       - uses: actions/checkout@v4
@@ -1580,7 +1610,7 @@ Requirements: Docker, [uv](https://docs.astral.sh/uv/).
 
     make up        # Postgres 16 + pgvector
     make seed      # migrations + JuriFindIT seed subset (no AWS needed)
-    make test      # unit + integration (set VIGILEX_LLM=fake)
+    make test      # unit + integration (sets VIGILEX_LLM=fake)
     make lint
 
 Data: JuriFindIT, CC BY-NC-SA 4.0 — see `data/README.md`. Non-commercial use only.
@@ -1593,8 +1623,8 @@ Replace the "Current state" section of `CLAUDE.md` with:
 - `make up` / `make seed` — local Postgres and seed data
 - `make test`, `make lint`, `make fmt`
 - Single test: `uv run pytest tests/unit/test_chunking.py::test_giant_token_is_split -v`
-- Integration tests need `VIGILEX_TEST_DATABASE_URL` (Makefile default points at compose) and skip without it.
-- Tests run with `VIGILEX_LLM=fake`; they never call Bedrock.
+- Integration tests need `VIGILEX_TEST_SERVER_URL`: a URL to any database on the test server (Makefile default: compose's `postgres` database), not the test database itself. They skip without it.
+- Tests run with `VIGILEX_LLM=fake` (the Makefile sets it); they never call Bedrock.
 
 ## Architecture
 
@@ -1612,4 +1642,4 @@ git commit -m "chore: make targets, CI workflow, dev docs
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
-- [ ] **Step 6: Push the branch and confirm CI is green** (`gh pr create` after the human's go-ahead).
+- [ ] **Step 6: Open the PR and confirm CI is green.** CI runs only on pull requests and pushes to `main`, so pushing the branch alone runs nothing. After the human's go-ahead: `git push -u origin step1/foundations && gh pr create --draft --base main`, then watch `gh pr checks --watch`. Mark the PR ready once checks pass.
