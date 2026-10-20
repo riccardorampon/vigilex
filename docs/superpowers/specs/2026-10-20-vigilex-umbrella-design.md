@@ -37,33 +37,33 @@ Each sub-project gets its own implementation plan, built in the order of §12.
 
 | table | columns / indexes |
 |---|---|
-| `articles` | `id` PK, `source_act`, `number`, `title`, `text`, `domain`, `tsv tsvector GENERATED ALWAYS AS (to_tsvector('italian', title \|\| ' ' \|\| text)) STORED`; GIN on `tsv` |
+| `articles` | `id` PK (JuriFindIT id), `source_act` (source document `file_name`), `path` (position in the act), `text`, `tsv tsvector GENERATED ALWAYS AS (to_tsvector('italian', text)) STORED`; GIN on `tsv`. The data has no article number, title or domain; domain lives on questions |
 | `article_chunks` | `article_id` FK, `ord`, `text`, `embedding vector(1024)`; PK (`article_id`, `ord`); HNSW (cosine) on `embedding` |
 | `article_refs` | `src_id`, `dst_id` (both FK to `articles`); PK (`src_id`, `dst_id`); index on `dst_id` |
-| `questions` | `id` PK, `text`, `kind` (`expert`/`synthetic`), `domain` |
+| `questions` | `id` PK (`"{split}-{row_index}"` in the original release file), `split`, `text`, `domain` (`normative_area`), `topics`. Only expert questions are ingested |
 | `qrels` | `question_id`, `article_id`; PK on both |
 | `eval_runs` | `id`, `created_at`, `git_sha`, `config_hash`, `retriever_config jsonb`, `metrics jsonb`, `per_query jsonb`, `judge bool` |
-| `embedding_cache` | `key` PK = `sha256(model_id + text)`, `embedding vector(1024)` |
+| `embedding_cache` | `key` PK = `sha256(model_id \0 input_type \0 text)`, `embedding vector(1024)` |
 | `session_quota` | `session_id`, `day`, `count`; PK (`session_id`, `day`) |
 | LangGraph tables | created by `langgraph-checkpoint-postgres` (`PostgresSaver`, `PostgresStore`) |
 
-Migrations: Alembic with plain SQL. Every migration must be compatible with both the previous and the new code version (expand → contract), because migrations run after the code update (§9).
+Migrations: plain `.sql` files applied in name order by a ~20-line runner (`schema_migrations` table), no Alembic/SQLAlchemy. Tables arrive with the step that needs them (`eval_runs` in step 2, `session_quota` in step 3). Every migration must be compatible with both the previous and the new code version (expand → contract), because migrations run after the code update (§9).
 
 ### 2.2 Ingestion
 
-`vigilex ingest --source <path> [--subset]` reads the JuriFindIT release and upserts into the tables above. It is idempotent.
+`vigilex ingest --source <path>` reads the JuriFindIT release and upserts into the tables above. It is idempotent and merges: rows upsert and each article's chunks are replaced, but rows missing from a newer release are never deleted (recreate the database for an exact mirror). The 159 `<< file root node >>` rows are document roots, not articles, and are skipped. The seed subset uses `vigilex build-seed` / `vigilex load-seed` (§2.3).
 
 - **The unit of retrieval is the article**, because the gold labels (`qrels`) are articles.
-- Articles are split into chunks that fit the embedding model's input limit. An article's vector score is the max over its chunks.
+- Articles are split into chunks by characters (max 1800, overlap 200), because Bedrock's Cohere embed accepts at most 2048 characters per text; a single token longer than that is hard-split (the corpus contains a 1.1M-character table). An article's vector score is the max over its chunks.
 - Embedding model: **Cohere Embed Multilingual v3 on Bedrock** (1024 dimensions). Documents use `input_type=search_document`, queries `search_query`. Embeddings are cached in `embedding_cache`, so re-ingestion never pays twice. Only the 895 expert questions are embedded.
 
 ### 2.3 Committed seed subset (`data/seed/`)
 
 For local development and CI, with no Bedrock calls needed:
 
-- About 150 expert questions from the AML and privacy domains.
-- Their gold articles, plus articles one cross-reference away, plus random distractor articles from the same domains: about 2k articles in total. Distractors keep local metrics from being inflated.
-- Article chunk embeddings and seed question embeddings as float16 Parquet (about 4 MB).
+- The 37 `validation`-split expert questions from the AML and privacy domains.
+- Their 432 gold articles, up to 500 sampled articles that gold articles cite (outgoing references only), and up to 1000 sampled distractors from the same acts: 1,932 articles. Distractors keep local metrics from being inflated.
+- Article chunk embeddings and seed question embeddings as float16 Parquet (≈11 MB in total with the corpus).
 - `make seed` loads it into the local database in about a minute.
 
 ## 3. Stack and repository layout
@@ -87,7 +87,7 @@ vigilex/
 │   ├── agent_graph/   # LangGraph agent
 │   └── api/           # FastAPI: JSON + SSE endpoints, Jinja/htmx pages
 ├── data/              # seed subset, LICENSE
-├── migrations/        # Alembic
+├── migrations/        # plain SQL
 ├── infra/
 │   ├── bootstrap/     # state bucket, GitHub OIDC provider and roles
 │   └── main/          # VPC, Aurora, Lambda, ECR, endpoints, S3
@@ -278,6 +278,6 @@ Each step gets its own implementation plan and ends deployable.
 
 ## 13. To verify before or during step 1
 
-- JuriFindIT license and release format (files, fields, how cross-references are encoded).
+- ~~JuriFindIT license and release format~~ — verified 2026-10-20: CC BY-NC-SA 4.0; `corpus.parquet` (`id`, `file_name`, `path`, `content`, `reference`), `questions/{train,validation}.parquet` (`question`, `topics`, `normative_area`, `relevant_doc_ids`), synthetic questions separately.
 - Availability in `eu-central-1` of: the chosen Claude models through EU inference profiles, Cohere Embed Multilingual v3, Cohere Rerank 3.5.
 - Aurora Serverless v2 scale-to-zero support for the chosen PostgreSQL 16 minor version.
