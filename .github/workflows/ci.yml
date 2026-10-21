@@ -1,0 +1,33 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    services:
+      db:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: vigilex
+          POSTGRES_PASSWORD: vigilex
+          POSTGRES_DB: vigilex
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vigilex"
+          --health-interval 2s
+          --health-retries 15
+    env:
+      VIGILEX_TEST_SERVER_URL: postgresql://vigilex:vigilex@localhost:5432/postgres
+      VIGILEX_LLM: fake
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pyright
+      - run: uv run pytest tests/unit
+      - run: uv run pytest tests/integration
