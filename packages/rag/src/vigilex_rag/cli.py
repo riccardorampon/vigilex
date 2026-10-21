@@ -89,6 +89,8 @@ def main(argv: list[str] | None = None) -> None:
                 make_reranker(settings),
             )
         print(result.text, "\n")
+        if result.truncated:
+            print("[answer truncated: it hit the output token limit]\n")
         for h in result.hits:
             mark = "*" if h.id in result.citations else " "
             print(f"{mark} [art:{h.id}] {h.score:.4f} {h.source_act} {h.path}")

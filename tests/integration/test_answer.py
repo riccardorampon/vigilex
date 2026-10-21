@@ -1,7 +1,7 @@
 import pytest
 from helpers import article
 from vigilex_core.embeddings import FakeEmbedder
-from vigilex_core.llm import FakeChat
+from vigilex_core.llm import Completion, FakeChat
 from vigilex_rag.answer import NOT_FOUND, answer
 from vigilex_rag.ingest import ingest
 from vigilex_rag.release import load_release
@@ -27,6 +27,18 @@ def test_answer_cites_retrieved_article(conn, tmp_path, write_release):
     a = answer(conn, "adeguata verifica?", RetrieverConfig(), FakeEmbedder(), FakeChat())
     assert a.citations == [1] and a.invalid_citations == []
     assert [h.id for h in a.hits] == [1]
+    assert a.truncated is False
+
+
+def test_answer_reports_truncation(conn, tmp_path, write_release):
+    one_article(conn, tmp_path, write_release)
+
+    class CutChat(FakeChat):
+        def complete(self, system, user, max_tokens):
+            return Completion("Gli obblighi [art:1] sono", truncated=True)
+
+    a = answer(conn, "adeguata verifica?", RetrieverConfig(), FakeEmbedder(), CutChat())
+    assert a.truncated is True and a.citations == [1]
 
 
 @pytest.mark.parametrize("mode", ["bm25", "vector", "hybrid"])

@@ -23,5 +23,6 @@ Seed retrieval eval (37 validation questions, 1,932 articles):
 | bm25 | 0.096 | 0.120 | 0.156 | 0.199 | 0.334 |
 | vector | 0.143 | 0.205 | 0.343 | 0.319 | 0.504 |
 | hybrid (RRF) | 0.124 | 0.153 | 0.246 | 0.251 | 0.426 |
+| hybrid + rerank (Cohere 3.5) | 0.251 | 0.303 | 0.378 | 0.459 | 0.673 |
 
 Data: JuriFindIT, CC BY-NC-SA 4.0 — see `data/README.md`. Non-commercial use only.

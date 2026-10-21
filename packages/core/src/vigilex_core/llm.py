@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from vigilex_core.bedrock import runtime_client
@@ -10,8 +11,14 @@ log = logging.getLogger(__name__)
 _FIRST_CITATION = re.compile(r"\[art:\d+\]")
 
 
+@dataclass(frozen=True)
+class Completion:
+    text: str
+    truncated: bool  # stopped by max_tokens: the text ends mid-answer
+
+
 class Chat(Protocol):
-    def complete(self, system: str, user: str, max_tokens: int) -> str: ...
+    def complete(self, system: str, user: str, max_tokens: int) -> Completion: ...
 
 
 class BedrockChat:
@@ -19,7 +26,7 @@ class BedrockChat:
         self.client = client
         self.model_id = model_id
 
-    def complete(self, system: str, user: str, max_tokens: int) -> str:
+    def complete(self, system: str, user: str, max_tokens: int) -> Completion:
         start = time.monotonic()
         resp = self.client.converse(
             modelId=self.model_id,
@@ -36,15 +43,19 @@ class BedrockChat:
             resp["stopReason"],
             (time.monotonic() - start) * 1000,
         )
-        return "".join(b.get("text", "") for b in resp["output"]["message"]["content"])
+        truncated = resp["stopReason"] == "max_tokens"
+        if truncated:
+            log.warning("chat answer truncated at max_tokens=%d", max_tokens)
+        text = "".join(b.get("text", "") for b in resp["output"]["message"]["content"])
+        return Completion(text, truncated)
 
 
 class FakeChat:
     """Deterministic stand-in: cites the first article tag it was given."""
 
-    def complete(self, system: str, user: str, max_tokens: int) -> str:
+    def complete(self, system: str, user: str, max_tokens: int) -> Completion:
         m = _FIRST_CITATION.search(user)
-        return f"Risposta di prova {m.group(0)}" if m else "Risposta di prova."
+        return Completion(f"Risposta di prova {m.group(0)}" if m else "Risposta di prova.", False)
 
 
 def make_chat(settings: Settings) -> Chat:

@@ -12,12 +12,13 @@ from vigilex_rag.retrieval import ArticleHit, RetrieverConfig, retrieve
 log = logging.getLogger(__name__)
 
 CITATION = re.compile(r"\[art:(\d+)\]")
-MAX_ANSWER_TOKENS = 1024
+MAX_ANSWER_TOKENS = 2048  # Sonnet's structured answers overran 1024
 PROMPT_DOC_CHARS = 4000
 NOT_FOUND = "Non ho trovato fonti pertinenti per rispondere a questa domanda."
 SYSTEM_PROMPT = (
     "Sei un assistente per la compliance antiriciclaggio e privacy (diritto italiano ed europeo). "
-    "Rispondi in italiano usando SOLO gli articoli forniti. "
+    "Rispondi in italiano usando SOLO gli articoli forniti, "
+    "in modo conciso (al massimo 300 parole). "
     "Dopo ogni affermazione cita l'articolo da cui proviene con il suo tag, ad esempio [art:123]. "
     "Se gli articoli non bastano per rispondere, dillo esplicitamente. "
     "Non citare articoli che non sono nell'elenco. "
@@ -31,6 +32,7 @@ class Answer:
     citations: list[int]
     invalid_citations: list[int]
     hits: list[ArticleHit]
+    truncated: bool = False
 
 
 def build_prompt(query: str, hits: list[ArticleHit]) -> str:
@@ -57,8 +59,8 @@ def answer(
     hits = retrieve(conn, query, cfg, embedder, reranker)
     if not hits:
         return Answer(NOT_FOUND, [], [], [])
-    text = chat.complete(SYSTEM_PROMPT, build_prompt(query, hits), MAX_ANSWER_TOKENS)
-    valid, invalid = check_citations(text, hits)
+    completion = chat.complete(SYSTEM_PROMPT, build_prompt(query, hits), MAX_ANSWER_TOKENS)
+    valid, invalid = check_citations(completion.text, hits)
     if invalid:
         log.warning("answer cited articles that were not retrieved: %s", invalid)
-    return Answer(text, valid, invalid, hits)
+    return Answer(completion.text, valid, invalid, hits, completion.truncated)
