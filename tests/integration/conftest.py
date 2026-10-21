@@ -3,8 +3,13 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from fastapi.testclient import TestClient
+from vigilex_api.app import create_app
+from vigilex_api.config import ApiConfig
 from vigilex_core.db import connect
 from vigilex_core.migrate import migrate
+from vigilex_core.settings import Settings
+from vigilex_rag.retrieval import RetrieverConfig
 
 REPO = Path(__file__).resolve().parents[2]
 TEST_DB = "vigilex_test"
@@ -32,4 +37,22 @@ def conn(db_url):
     with connect(db_url) as c:
         c.execute(f"TRUNCATE {TABLES} CASCADE")
         c.commit()
+        yield c
+
+
+@pytest.fixture
+def api_config() -> ApiConfig:
+    return ApiConfig(
+        passcode="pw",
+        secret_key=b"test-key",
+        retriever=RetrieverConfig(),  # hybrid, no rerank: fake mode has no reranker
+        daily_quota=3,
+        global_daily_quota=100,
+    )
+
+
+@pytest.fixture
+def client(db_url, conn, api_config):
+    settings = Settings(db_url, "fake", "eu-central-1", "cohere.embed-multilingual-v3", "c", "r")
+    with TestClient(create_app(api_config, settings), base_url="https://testserver") as c:
         yield c
