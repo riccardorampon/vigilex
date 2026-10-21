@@ -99,3 +99,47 @@ def rag_answer(
             yield event("error", {"message": "Errore interno: riprova tra poco."})
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers=STREAM_HEADERS)
+
+
+RUN_COLUMNS = (
+    "id",
+    "created_at",
+    "git_sha",
+    "config_name",
+    "config_hash",
+    "split",
+    "n_questions",
+    "metrics",
+)
+RUN_SELECT = "SELECT " + ", ".join(RUN_COLUMNS)
+
+
+@router.get("/api/eval/runs", dependencies=[Depends(require_session)])
+def eval_runs(request: Request, scope: str = "current") -> list[dict]:
+    st = state(request)
+    if scope not in ("current", "all"):
+        raise HTTPException(status_code=422, detail="scope must be current or all")
+    # where and the column list are constants chosen in code, never user input
+    where, params = (
+        ("WHERE config_hash = %s", (st.config.retriever.config_hash(),))
+        if scope == "current"
+        else ("", ())
+    )
+    with st.pool.connection() as conn:
+        rows = conn.execute(
+            f"{RUN_SELECT} FROM eval_runs {where} ORDER BY created_at DESC, id DESC LIMIT 50",  # type: ignore[arg-type]
+            params,
+        ).fetchall()
+    return [dict(zip(RUN_COLUMNS, r, strict=True)) for r in rows]
+
+
+@router.get("/api/eval/runs/{run_id}", dependencies=[Depends(require_session)])
+def eval_run(run_id: int, request: Request) -> dict:
+    with state(request).pool.connection() as conn:
+        row = conn.execute(
+            f"{RUN_SELECT}, per_query FROM eval_runs WHERE id = %s",  # type: ignore[arg-type]
+            (run_id,),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="eval run not found")
+    return dict(zip((*RUN_COLUMNS, "per_query"), row, strict=True))
