@@ -1,0 +1,16 @@
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: vigilex
+      POSTGRES_PASSWORD: vigilex
+      POSTGRES_DB: vigilex
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vigilex"]
+      interval: 2s
+      retries: 15
+
+volumes:
+  pgdata: {}
