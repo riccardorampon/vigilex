@@ -5,6 +5,9 @@ import psycopg
 
 def migrate(url: str, migrations_dir: Path) -> list[str]:
     """Apply *.sql files in name order, each in its own transaction, once."""
+    files = sorted(migrations_dir.glob("*.sql"))
+    if not files:
+        raise FileNotFoundError(f"no .sql migrations in {migrations_dir.resolve()}")
     applied: list[str] = []
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute(
@@ -12,7 +15,7 @@ def migrate(url: str, migrations_dir: Path) -> list[str]:
             "(version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
         )
         done = {r[0] for r in conn.execute("SELECT version FROM schema_migrations")}
-        for path in sorted(migrations_dir.glob("*.sql")):
+        for path in files:
             if path.stem in done:
                 continue
             with conn.transaction():

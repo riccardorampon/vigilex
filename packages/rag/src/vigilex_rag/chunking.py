@@ -1,3 +1,8 @@
+import re
+
+# Inline images (data URIs) in some acts: embedding them only adds noise and cost.
+DATA_URI = re.compile(r"data:[^,\s\"]*;base64,[^\s\"<>]*")
+
 # Bedrock's Cohere embed rejects texts over 2048 characters; keep a safety margin.
 MAX_CHARS = 1800
 OVERLAP = 200
@@ -6,7 +11,7 @@ OVERLAP = 200
 def chunk_text(text: str, max_chars: int = MAX_CHARS, overlap: int = OVERLAP) -> list[str]:
     """Greedy word-packing into chunks of at most max_chars, with ~overlap chars repeated."""
     words: list[str] = []
-    for w in text.split():
+    for w in DATA_URI.sub("", text).split():
         words.extend(w[i : i + max_chars] for i in range(0, len(w), max_chars))
 
     chunks: list[str] = []

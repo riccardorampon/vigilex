@@ -24,3 +24,10 @@ def test_giant_token_is_split():
     chunks = chunk_text("inizio " + "x" * 5000 + " fine", max_chars=1800, overlap=200)
     assert all(len(c) <= 1800 for c in chunks)
     assert "".join(c.replace(" ", "") for c in chunks).count("x") >= 5000
+
+
+def test_inline_base64_images_are_dropped():
+    text = 'Figura 1 <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAA+/=="> legenda'
+    assert chunk_text(text) == ['Figura 1 <img src=""> legenda']
+    # URL-encoded payload, as in the real corpus (article 8788)
+    assert chunk_text('a <img src="data:image;base64,%20/9j/4AAQSkZJRg"> b') == ['a <img src=""> b']
