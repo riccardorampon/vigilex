@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="it" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}vigilex{% endblock %}</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="container">
+    <nav>
+      <ul><li><strong>vigilex</strong></li></ul>
+      {% if logged_in %}
+      <ul>
+        <li><a href="/">Chat</a></li>
+        <li><a href="/eval">Eval</a></li>
+        <li><form method="post" action="/logout" class="inline"><button class="secondary outline">Esci</button></form></li>
+      </ul>
+      {% endif %}
+    </nav>
+  </header>
+  <main class="container">{% block content %}{% endblock %}</main>
+  <footer class="container"><small>Dati: JuriFindIT (CC BY-NC-SA 4.0). Risposte informative, non consulenza legale.</small></footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

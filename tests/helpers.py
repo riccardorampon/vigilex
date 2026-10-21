@@ -44,3 +44,9 @@ def write_release(d: Path, corpus: list[dict], validation: list[dict] | None = N
             pa.Table.from_pylist(validation, schema=QUESTION_SCHEMA), d / "validation.parquet"
         )
     return d
+
+
+def login(client, passcode: str = "pw"):
+    r = client.post("/login", data={"passcode": passcode}, follow_redirects=False)
+    assert r.status_code == 303, r.text
+    return r

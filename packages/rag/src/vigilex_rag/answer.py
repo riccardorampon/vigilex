@@ -48,6 +48,16 @@ def check_citations(text: str, hits: list[ArticleHit]) -> tuple[list[int], list[
     return [c for c in cited if c in allowed], [c for c in cited if c not in allowed]
 
 
+def generate(query: str, hits: list[ArticleHit], chat: Chat) -> Answer:
+    if not hits:
+        return Answer(NOT_FOUND, [], [], [])
+    completion = chat.complete(SYSTEM_PROMPT, build_prompt(query, hits), MAX_ANSWER_TOKENS)
+    valid, invalid = check_citations(completion.text, hits)
+    if invalid:
+        log.warning("answer cited articles that were not retrieved: %s", invalid)
+    return Answer(completion.text, valid, invalid, hits, completion.truncated)
+
+
 def answer(
     conn: psycopg.Connection,
     query: str,
@@ -56,11 +66,4 @@ def answer(
     chat: Chat,
     reranker: Reranker | None = None,
 ) -> Answer:
-    hits = retrieve(conn, query, cfg, embedder, reranker)
-    if not hits:
-        return Answer(NOT_FOUND, [], [], [])
-    completion = chat.complete(SYSTEM_PROMPT, build_prompt(query, hits), MAX_ANSWER_TOKENS)
-    valid, invalid = check_citations(completion.text, hits)
-    if invalid:
-        log.warning("answer cited articles that were not retrieved: %s", invalid)
-    return Answer(completion.text, valid, invalid, hits, completion.truncated)
+    return generate(query, retrieve(conn, query, cfg, embedder, reranker), chat)

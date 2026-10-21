@@ -10,9 +10,12 @@ Requirements: Docker, [uv](https://docs.astral.sh/uv/).
     make test      # unit + integration (sets VIGILEX_LLM=fake)
     make lint
     make eval-ci   # retrieval eval on the seed, no AWS
+    make app       # web app on http://localhost:8080 (passcode: dev), fake LLM, no AWS
+    make e2e       # Playwright tests against the running app (once: uv run playwright install chromium)
 
 With AWS credentials (Bedrock in eu-central-1):
 
+    make app-bedrock   # real answers and rerank; passes short-lived AWS credentials to the container
     uv run vigilex ask "Quali sono gli obblighi di adeguata verifica della clientela?" --rerank
     make eval      # adds the hybrid+rerank row
 

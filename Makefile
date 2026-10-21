@@ -62,3 +62,18 @@ ingest-full: download migrate
 	uv run vigilex ingest --source data/raw
 
 .PHONY: eval eval-ci ingest-full
+
+app: up seed
+	docker compose up -d --wait --build api
+	@echo "vigilex on http://localhost:8080 (passcode: $${VIGILEX_PASSCODE:-dev})"
+
+# Real Bedrock answers and rerank; needs a valid AWS session (credentials last about an hour).
+app-bedrock: up seed
+	eval "$$(aws configure export-credentials --format env)" && \
+		VIGILEX_LLM=bedrock VIGILEX_RERANK=true docker compose up -d --wait --build api
+	@echo "vigilex (Bedrock) on http://localhost:8080"
+
+e2e:
+	VIGILEX_E2E_URL=http://localhost:8080 uv run pytest tests/e2e
+
+.PHONY: app app-bedrock e2e

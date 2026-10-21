@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Chat — vigilex{% endblock %}
+{% block content %}
+<form id="ask">
+  <fieldset role="group">
+    <input id="question" name="q" maxlength="1000" required
+           placeholder="Es. Quali sono gli obblighi di adeguata verifica della clientela?">
+    <button type="submit">Chiedi</button>
+  </fieldset>
+  <small>Retrieval: <code>{{ live.name() }}</code> · le risposte citano gli articoli come [art:ID]</small>
+</form>
+<div class="layout">
+  <section>
+    <h3>Risposta</h3>
+    <p id="status" aria-live="polite"></p>
+    <div class="answer" id="answer"></div>
+  </section>
+  <aside>
+    <h3>Articoli recuperati</h3>
+    <ol class="hits" id="hits"></ol>
+  </aside>
+</div>
+<dialog id="article-dialog">
+  <article>
+    <header><button class="close" aria-label="Chiudi" data-close></button><strong id="article-title"></strong></header>
+    <pre id="article-text"></pre>
+  </article>
+</dialog>
+{% endblock %}
+{% block scripts %}<script src="/static/app.js" defer></script>{% endblock %}

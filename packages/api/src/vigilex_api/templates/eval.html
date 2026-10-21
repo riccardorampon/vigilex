@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Eval — vigilex{% endblock %}
+{% block content %}
+<h2>Valutazione del retrieval</h2>
+<p>Configurazione attiva: <strong>{{ live.name() }}</strong> <code>{{ live.config_hash() }}</code></p>
+{% if not rows %}
+<p>Nessuna valutazione registrata. Esegui <code>make eval-ci</code> (o <code>make eval</code> con AWS).</p>
+{% else %}
+<figure>
+<table>
+  <thead><tr><th>config</th><th class="num">domande</th>{% for m in metrics %}<th class="num">{{ m }}</th>{% endfor %}<th>quando</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr{% if r[2] == live.config_hash() %} class="current"{% endif %}>
+      <td>{{ r[1] }}</td><td class="num">{{ r[3] }}</td>
+      {% for m in metrics %}<td class="num">{{ "%.3f"|format(r[4][m]) }}</td>{% endfor %}
+      <td><small>{{ r[5].strftime("%Y-%m-%d %H:%M") }}{% if r[6] %} · {{ r[6][:7] }}{% endif %}</small></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</figure>
+{% if spark %}
+<p>recall@10 della configurazione attiva, ultime {{ history_len }} esecuzioni:
+  <svg class="spark" width="120" height="24" viewBox="-2 -2 124 28" role="img" aria-label="andamento recall@10">
+    <polyline points="{{ spark }}" fill="none" stroke="currentColor" stroke-width="1.5"/>
+  </svg>
+</p>
+{% endif %}
+<h3>Domande senza alcun articolo pertinente nei primi 20</h3>
+{% if missed %}
+<ul>{% for qid, text in missed %}<li><code>{{ qid }}</code> {{ text }}</li>{% endfor %}</ul>
+{% else %}
+<p>Nessuna.</p>
+{% endif %}
+{% endif %}
+{% endblock %}

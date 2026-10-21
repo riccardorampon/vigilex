@@ -1,0 +1,14 @@
+.narrow { max-width: 28rem; margin: 2rem auto; }
+.error { color: var(--pico-del-color); }
+form.inline { margin: 0; }
+form.inline button { margin: 0; padding: 0.25rem 0.75rem; }
+.answer { white-space: pre-wrap; }
+.layout { display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem; }
+@media (max-width: 768px) { .layout { grid-template-columns: 1fr; } }
+.hits li { font-size: 0.85rem; }
+.cited { font-weight: 600; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.current { background: var(--pico-mark-background-color); }
+svg.spark { vertical-align: middle; }
+dialog article { max-width: 60rem; }
+dialog pre { white-space: pre-wrap; }

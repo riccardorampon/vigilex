@@ -2,7 +2,7 @@
 name = "vigilex"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = ["vigilex-core", "vigilex-rag"]
+dependencies = ["vigilex-core", "vigilex-rag", "vigilex-api"]
 
 [tool.uv.workspace]
 members = ["packages/*"]
@@ -10,9 +10,10 @@ members = ["packages/*"]
 [tool.uv.sources]
 vigilex-core = { workspace = true }
 vigilex-rag = { workspace = true }
+vigilex-api = { workspace = true }
 
 [dependency-groups]
-dev = ["pytest>=8.3", "ruff==0.17.1", "pyright>=1.1.390", "pre-commit>=4.0"]
+dev = ["pytest>=8.3", "ruff==0.17.1", "pyright>=1.1.390", "pre-commit>=4.0", "httpx>=0.28", "pytest-playwright>=0.7"]
 
 [tool.ruff]
 line-length = 100
