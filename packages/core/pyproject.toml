@@ -2,7 +2,8 @@
 name = "vigilex-core"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = ["psycopg[binary]>=3.2", "pgvector>=0.5", "numpy>=2.0", "boto3>=1.35"]
+# boto3[crt]: credentials from `aws login` need awscrt
+dependencies = ["psycopg[binary]>=3.2", "pgvector>=0.5", "numpy>=2.0", "boto3[crt]>=1.35"]
 
 [build-system]
 requires = ["hatchling"]

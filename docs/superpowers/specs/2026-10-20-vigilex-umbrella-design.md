@@ -279,5 +279,5 @@ Each step gets its own implementation plan and ends deployable.
 ## 13. To verify before or during step 1
 
 - ~~JuriFindIT license and release format~~ — verified 2026-10-20: CC BY-NC-SA 4.0; `corpus.parquet` (`id`, `file_name`, `path`, `content`, `reference`), `questions/{train,validation}.parquet` (`question`, `topics`, `normative_area`, `relevant_doc_ids`), synthetic questions separately.
-- Availability in `eu-central-1` of: the chosen Claude models through EU inference profiles, Cohere Embed Multilingual v3, Cohere Rerank 3.5.
-- Aurora Serverless v2 scale-to-zero support for the chosen PostgreSQL 16 minor version.
+- ~~Bedrock availability in `eu-central-1`~~ — verified 2026-10-21: `cohere.embed-multilingual-v3` (in use; `check-bedrock` returned 1024 dims), `cohere.rerank-v3-5:0`, and `cohere.embed-v4:0` (a candidate to compare in the eval). Claude via EU inference profiles: `eu.anthropic.claude-sonnet-5-5` (chat/synthesis) and `eu.anthropic.claude-haiku-5-5` (routing, LLM-as-judge); `global.*` profiles exist but would route outside the EU, so they are not used.
+- ~~Aurora PostgreSQL 16 minor version~~ — verified 2026-10-21: available non-Limitless 16.x versions in `eu-central-1` are 16.8–16.15. Scale to 0 ACU needs 16.3 or later, so use **16.15** (the newest).
