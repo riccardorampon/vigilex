@@ -13,9 +13,11 @@ Mode = Literal["bm25", "vector", "hybrid"]
 CHUNKS_PER_ARTICLE = 4  # chunks read per wanted article, so max-per-article still fills n
 
 # OR of the query's Italian lexemes: plainto_tsquery ANDs them, which natural-language
-# questions almost never satisfy. ts_rank_cd still rewards articles matching more terms.
+# questions almost never satisfy. ts_rank with normalization 1 (divide by 1 + log length):
+# on the seed eval it scored recall@10 0.120 vs 0.034 for ts_rank_cd. Neither has IDF, so
+# this is BM25-like, not BM25 (an Okapi-in-SQL prototype reached 0.159).
 BM25_SQL = """
-SELECT a.id, ts_rank_cd(a.tsv, t.q) AS score
+SELECT a.id, ts_rank(a.tsv, t.q, 1) AS score
 FROM articles a,
      (SELECT replace(plainto_tsquery('italian', %(q)s)::text, ' & ', ' | ')::tsquery AS q) t
 WHERE a.tsv @@ t.q
