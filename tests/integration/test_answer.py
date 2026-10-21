@@ -1,3 +1,4 @@
+import pytest
 from helpers import article
 from vigilex_core.embeddings import FakeEmbedder
 from vigilex_core.llm import FakeChat
@@ -28,8 +29,15 @@ def test_answer_cites_retrieved_article(conn, tmp_path, write_release):
     assert [h.id for h in a.hits] == [1]
 
 
-def test_answer_without_hits_skips_llm(conn, tmp_path, write_release):
+@pytest.mark.parametrize("mode", ["bm25", "vector", "hybrid"])
+@pytest.mark.parametrize("question", ["", "  ", "di il la"])
+def test_answer_without_hits_skips_llm(conn, tmp_path, write_release, mode, question):
     one_article(conn, tmp_path, write_release)
     chat = RecordingChat()
-    a = answer(conn, "di il la", RetrieverConfig(mode="bm25"), FakeEmbedder(), chat)
+
+    class NoEmbed(FakeEmbedder):
+        def embed(self, texts, input_type):
+            raise AssertionError("a question with no content words must not be embedded")
+
+    a = answer(conn, question, RetrieverConfig(mode=mode), NoEmbed(), chat)
     assert a.text == NOT_FOUND and a.hits == [] and chat.calls == 0

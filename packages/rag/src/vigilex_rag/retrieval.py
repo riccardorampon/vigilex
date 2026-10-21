@@ -71,6 +71,12 @@ def bm25_search(conn: psycopg.Connection, query: str, n: int) -> list[tuple[int,
     return [(r[0], float(r[1])) for r in rows]
 
 
+def has_content_words(conn: psycopg.Connection, query: str) -> bool:
+    """False for empty or stopword-only questions (no Italian lexemes left)."""
+    row = conn.execute("SELECT numnode(plainto_tsquery('italian', %s)) > 0", (query,)).fetchone()
+    return bool(row and row[0])
+
+
 def vector_search(
     conn: psycopg.Connection, query_vector: Sequence[float], n: int
 ) -> list[tuple[int, float]]:
@@ -106,6 +112,8 @@ def retrieve(
 ) -> list[ArticleHit]:
     if cfg.rerank and reranker is None:
         raise ValueError(f"config {cfg.name()} needs a reranker")
+    if not has_content_words(conn, query):
+        return []  # vector search always has neighbours; an empty question must not get answers
     rankings: list[list[int]] = []
     if cfg.mode in ("bm25", "hybrid"):
         rankings.append([a for a, _ in bm25_search(conn, query, cfg.candidates)])
