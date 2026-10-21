@@ -30,3 +30,4 @@ typeCheckingMode = "standard"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["tests"]
+addopts = "--import-mode=importlib"  # same test basenames in unit/ and integration/

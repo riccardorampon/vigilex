@@ -8,7 +8,7 @@ from vigilex_core.migrate import migrate
 
 REPO = Path(__file__).resolve().parents[2]
 TEST_DB = "vigilex_test"
-TABLES = "articles, article_refs, article_chunks, questions, qrels, embedding_cache"
+TABLES = "articles, article_refs, article_chunks, questions, qrels, embedding_cache, eval_runs"
 
 
 @pytest.fixture(scope="session")

@@ -31,3 +31,7 @@ jobs:
       - run: uv run pyright
       - run: uv run pytest tests/unit
       - run: uv run pytest tests/integration
+      - run: uv run vigilex migrate && uv run vigilex load-seed
+      - run: make eval-ci
+        env:
+          VIGILEX_GIT_SHA: ${{ github.sha }}

@@ -69,12 +69,12 @@ For local development and CI, with no Bedrock calls needed:
 ## 3. Stack and repository layout
 
 - **Language and tooling:** Python 3.12, uv workspace, ruff (lint + format), pyright, pytest, pre-commit.
-- **LLM:** Amazon Bedrock only. Claude models (via EU cross-region inference profiles) for chat; the cheapest current Claude model for routing and LLM-as-judge; Cohere Embed Multilingual v3 for embeddings; Cohere Rerank 3.5 via the Bedrock Rerank API.
+- **LLM:** Amazon Bedrock only. Claude models (via EU cross-region inference profiles) for chat; the cheapest current Claude model for routing and LLM-as-judge; Cohere Embed Multilingual v3 for embeddings; Cohere Rerank 3.5 via `InvokeModel` on `bedrock-runtime` (not the Rerank API on `bedrock-agent-runtime`), so embed, chat and rerank share one client and one VPC endpoint. Model ids are configurable (`VIGILEX_CHAT_MODEL_ID`, `VIGILEX_RERANK_MODEL_ID`).
 - **Region:** `eu-central-1` (Frankfurt) for every resource, chosen for Bedrock model availability.
 - **Database:** Postgres (Aurora Serverless v2 in AWS, `pgvector/pgvector:pg16` locally).
 - **Web:** FastAPI, Jinja, htmx with the SSE extension, Pico.css. Static files are vendored.
 - **Agents:** hand-written ReAct loop; LangGraph for the graph agent; official `mcp` Python SDK (FastMCP) for the MCP server.
-- **Evaluation:** `ranx` for IR metrics; custom judge prompt on Bedrock.
+- **Evaluation:** IR metrics in ~30 lines of stdlib code (not `ranx`, which would pull numba/llvmlite into the Lambda image), pinned by hand-computed tests; custom judge prompt on Bedrock.
 - **IaC:** Terraform. **CI/CD:** GitHub Actions with AWS OIDC.
 
 ```
@@ -106,12 +106,12 @@ The ReAct agent uses MCP and the graph agent does not. This is a deliberate cont
 
 `rag.retrieve(query, cfg: RetrieverConfig) -> list[ArticleHit]`
 
-1. **Keyword:** `websearch_to_tsquery('italian', q)`, ranked by `ts_rank_cd`, top 50 articles.
-2. **Vector:** embed the query; HNSW search over `article_chunks`; max score per article; top 50 articles.
+1. **Keyword:** the OR of the query's Italian lexemes (`plainto_tsquery` with `&` → `|`; AND semantics almost never match a natural-language question), ranked by `ts_rank(tsv, q, 1)` (length-normalized), top 50 articles. Measured on the seed: recall@10 0.120 vs 0.034 for `ts_rank_cd`. Neither has IDF; an Okapi BM25-in-SQL prototype reached 0.159 and is a possible follow-up.
+2. **Vector:** embed the query; HNSW search over `article_chunks` reading 4 × 50 chunks with `hnsw.ef_search` raised per query (pgvector otherwise caps HNSW results at 40 rows, which yielded only 20 articles); max score per article; top 50 articles.
 3. **Fusion:** Reciprocal Rank Fusion with `k = 60`.
 4. **Rerank (optional):** Cohere Rerank 3.5 reorders the fused top 50 and keeps the top 10.
 
-`RetrieverConfig` (Pydantic) holds `mode` (`bm25` | `vector` | `hybrid`), top-k values, `rerank` flag and embedding model id. The deployed config is read from environment variables. `config_hash` = sha256 of its canonical JSON; it ties `eval_runs` to the "current" RAG.
+`RetrieverConfig` (a frozen dataclass; Pydantic arrives with FastAPI in step 3) holds `mode` (`bm25` | `vector` | `hybrid`), top-k values, `rerank` flag and embedding model id. The deployed config is read from environment variables. `config_hash` = first 16 hex chars of the sha256 of its canonical JSON; it ties `eval_runs` to the "current" RAG.
 
 ### 4.2 Answering
 
@@ -121,10 +121,10 @@ The ReAct agent uses MCP and the graph agent does not. This is a deliberate cont
 
 `vigilex eval [--judge] [--sample N] [--config <json>]` writes one `eval_runs` row per config evaluated.
 
-- **Layer 1, retrieval (deterministic, free):** recall@k (k = 5, 10, 20), nDCG@10, MRR, computed by `ranx` against `qrels` of the expert questions. Default run compares four configs: BM25, vector, hybrid, hybrid + rerank.
+- **Layer 1, retrieval (deterministic, free):** recall@k (k = 5, 10, 20), nDCG@10, MRR against `qrels` of the expert questions, retrieving to depth 20 while storing the evaluated config unchanged. Default run compares four configs: BM25, vector, hybrid, hybrid + rerank. With `VIGILEX_LLM=fake` there is no reranker, so rerank configs are skipped, never scored with a fake. Seed metrics (37 questions, 1.9k articles) are not comparable with the JuriFindIT paper; `make ingest-full` loads the full corpus for that.
 - **Layer 2, generation (LLM-as-judge, paid):** on a sample (default 100 questions), the cheapest Claude model scores faithfulness (claims supported by retrieved articles), citation correctness (cited IDs vs gold) and answer relevance, using a tool-use JSON schema for verdicts. The judge is validated once against a small hand-labelled sample; agreement is recorded in the repo.
 - **When it runs:** layer 1 on every PR (seed subset) and after every deploy (full corpus, in AWS). Layer 2 only by manual trigger.
-- **Regression gate:** CI fails if hybrid recall@10 on the seed subset drops below a threshold committed in the repo.
+- **Regression gate:** CI fails if hybrid recall@10 on the seed subset drops below a threshold committed in the repo (`GATE` in the Makefile: 0.10, from a measured 0.153 minus a 5-point margin).
 
 ## 5. Sub-project 2: MCP server and ReAct agent
 
@@ -275,9 +275,10 @@ Each step gets its own implementation plan and ends deployable.
 5. **Graph agent** with memory and interrupts, wired into API and UI.
 6. **Eval layer 2** (judge) and its validation.
 7. Later: React SPA replacing the htmx UI.
+8. Later (decided 2026-10-21): true Okapi BM25 in SQL for the keyword ranking (precomputed document length + document-frequency table refreshed after ingest). Seed prototype: keyword recall@10 0.159 vs 0.120 for `ts_rank`, hybrid 0.189 vs 0.153. Deferred because rerank already lifts hybrid to 0.303; step 3 deploys `hybrid+rerank` as the default config.
 
 ## 13. To verify before or during step 1
 
 - ~~JuriFindIT license and release format~~ — verified 2026-10-20: CC BY-NC-SA 4.0; `corpus.parquet` (`id`, `file_name`, `path`, `content`, `reference`), `questions/{train,validation}.parquet` (`question`, `topics`, `normative_area`, `relevant_doc_ids`), synthetic questions separately.
-- ~~Bedrock availability in `eu-central-1`~~ — verified 2026-10-21: `cohere.embed-multilingual-v3` (in use; `check-bedrock` returned 1024 dims), `cohere.rerank-v3-5:0`, and `cohere.embed-v4:0` (a candidate to compare in the eval). Claude via EU inference profiles: `eu.anthropic.claude-sonnet-5-5` (chat/synthesis) and `eu.anthropic.claude-haiku-5-5` (routing, LLM-as-judge); `global.*` profiles exist but would route outside the EU, so they are not used.
+- ~~Bedrock availability in `eu-central-1`~~ — verified 2026-10-21: `cohere.embed-multilingual-v3` (in use; `check-bedrock` returned 1024 dims), `cohere.rerank-v3-5:0`, and `cohere.embed-v4:0` (a candidate to compare in the eval). Claude via EU inference profiles: the 5.x profiles are listed but this account gets `AccessDeniedException` on them, so the defaults are `eu.anthropic.claude-sonnet-4-6` (chat/synthesis) and `eu.anthropic.claude-haiku-4-5-20251001-v1:0` (routing, LLM-as-judge in later steps); switch by env var once 5.x access is granted. Later the same day every Claude model returned "Anthropic use case details have not been submitted": the account owner must submit that form in the Bedrock console. `global.*` profiles would route outside the EU, so they are not used.
 - ~~Aurora PostgreSQL 16 minor version~~ — verified 2026-10-21: available non-Limitless 16.x versions in `eu-central-1` are 16.8–16.15. Scale to 0 ACU needs 16.3 or later, so use **16.15** (the newest).

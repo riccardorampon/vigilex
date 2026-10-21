@@ -46,3 +46,19 @@ fmt:
 	uv run ruff format .
 
 .PHONY: up migrate seed test-unit test-integration test lint fmt
+
+# Seed hybrid recall@10 measured 0.153 on 2026-10-21; 5-point margin for HNSW build variance.
+GATE ?= 0.10
+
+eval:
+	uv run vigilex eval
+
+eval-ci:
+	VIGILEX_LLM=fake uv run vigilex eval --configs bm25,vector,hybrid --min-recall-at-10 $(GATE) \
+		--report "$${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+# Optional, needs AWS: embeds the full corpus (~36k chunks, about $1.5) into the local DB.
+ingest-full: download migrate
+	uv run vigilex ingest --source data/raw
+
+.PHONY: eval eval-ci ingest-full
