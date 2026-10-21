@@ -5,11 +5,10 @@ import random
 from collections.abc import Sequence
 from typing import Any, Literal, Protocol
 
-import boto3
 import numpy as np
 import psycopg
-from botocore.config import Config
 
+from vigilex_core.bedrock import runtime_client
 from vigilex_core.settings import Settings
 
 EMBED_DIM = 1024
@@ -95,12 +94,7 @@ class CachedEmbedder:
 
 
 def bedrock_embedder(settings: Settings) -> BedrockEmbedder:
-    client = boto3.client(
-        "bedrock-runtime",
-        region_name=settings.aws_region,
-        config=Config(retries={"mode": "adaptive", "max_attempts": 10}),
-    )
-    return BedrockEmbedder(client, settings.embed_model_id)
+    return BedrockEmbedder(runtime_client(settings), settings.embed_model_id)
 
 
 def make_embedder(settings: Settings, conn: psycopg.Connection) -> CachedEmbedder:

@@ -11,6 +11,8 @@ class Settings:
     llm: Literal["bedrock", "fake"]
     aws_region: str
     embed_model_id: str
+    chat_model_id: str
+    rerank_model_id: str
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -24,4 +26,6 @@ class Settings:
             llm=cast(Literal["bedrock", "fake"], llm),
             aws_region=os.environ.get("VIGILEX_AWS_REGION", "eu-central-1"),
             embed_model_id=os.environ.get("VIGILEX_EMBED_MODEL_ID", "cohere.embed-multilingual-v3"),
+            chat_model_id=os.environ.get("VIGILEX_CHAT_MODEL_ID", "eu.anthropic.claude-sonnet-4-6"),
+            rerank_model_id=os.environ.get("VIGILEX_RERANK_MODEL_ID", "cohere.rerank-v3-5:0"),
         )

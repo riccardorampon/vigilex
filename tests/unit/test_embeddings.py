@@ -42,6 +42,8 @@ def test_fake_embedder_is_deterministic_unit_norm_and_input_type_aware():
 
 
 def test_fake_mode_never_stores():
-    s = Settings("postgresql://unused", "fake", "eu-central-1", "cohere.embed-multilingual-v3")
+    s = Settings(
+        "postgresql://unused", "fake", "eu-central-1", "cohere.embed-multilingual-v3", "c", "r"
+    )
     cached = make_embedder(s, None)  # fake mode never touches conn at construction
     assert cached.store is False and isinstance(cached.inner, FakeEmbedder)

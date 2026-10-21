@@ -8,6 +8,8 @@ def test_defaults(monkeypatch):
         "VIGILEX_LLM",
         "VIGILEX_AWS_REGION",
         "VIGILEX_EMBED_MODEL_ID",
+        "VIGILEX_CHAT_MODEL_ID",
+        "VIGILEX_RERANK_MODEL_ID",
     ):
         monkeypatch.delenv(k, raising=False)
     s = Settings.from_env()
@@ -15,6 +17,8 @@ def test_defaults(monkeypatch):
     assert s.llm == "bedrock"
     assert s.aws_region == "eu-central-1"
     assert s.embed_model_id == "cohere.embed-multilingual-v3"
+    assert s.chat_model_id == "eu.anthropic.claude-sonnet-4-6"
+    assert s.rerank_model_id == "cohere.rerank-v3-5:0"
 
 
 def test_invalid_llm_rejected(monkeypatch):
