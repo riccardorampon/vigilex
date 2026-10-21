@@ -107,3 +107,12 @@ def eval_page(request: Request) -> Response:
             "missed": missed,
         },
     )
+
+
+@router.get("/", response_class=HTMLResponse)
+def chat_page(request: Request) -> Response:
+    if page_session(request) is None:
+        return _login_redirect()
+    return templates.TemplateResponse(
+        request, "chat.html", {"logged_in": True, "live": state(request).config.retriever}
+    )
