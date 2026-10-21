@@ -72,7 +72,7 @@ For local development and CI, with no Bedrock calls needed:
 - **LLM:** Amazon Bedrock only. Claude models (via EU cross-region inference profiles) for chat; the cheapest current Claude model for routing and LLM-as-judge; Cohere Embed Multilingual v3 for embeddings; Cohere Rerank 3.5 via `InvokeModel` on `bedrock-runtime` (not the Rerank API on `bedrock-agent-runtime`), so embed, chat and rerank share one client and one VPC endpoint. Model ids are configurable (`VIGILEX_CHAT_MODEL_ID`, `VIGILEX_RERANK_MODEL_ID`).
 - **Region:** `eu-central-1` (Frankfurt) for every resource, chosen for Bedrock model availability.
 - **Database:** Postgres (Aurora Serverless v2 in AWS, `pgvector/pgvector:pg16` locally).
-- **Web:** FastAPI, Jinja, htmx with the SSE extension, Pico.css. Static files are vendored.
+- **Web:** FastAPI, Jinja, Pico CSS (vendored) and ~70 lines of vanilla JS using `EventSource`. No htmx: its SSE extension swaps server-rendered HTML, which would need an HTML twin of every JSON endpoint the later React SPA uses.
 - **Agents:** hand-written ReAct loop; LangGraph for the graph agent; official `mcp` Python SDK (FastMCP) for the MCP server.
 - **Evaluation:** IR metrics in ~30 lines of stdlib code (not `ranx`, which would pull numba/llvmlite into the Lambda image), pinned by hand-computed tests; custom judge prompt on Bedrock.
 - **IaC:** Terraform. **CI/CD:** GitHub Actions with AWS OIDC.
@@ -183,13 +183,14 @@ route ──simple──► answer_direct (rag.answer) ──► END
 
 | endpoint | returns |
 |---|---|
-| `POST /api/rag/answer` | SSE: `hits`, `answer`, `error` |
+| `GET /api/rag/answer?q=…` | SSE: `hits`, then `answer` or `error` (always last). GET because `EventSource` cannot POST; `Cache-Control: no-store`; 422 over 1000 chars; 429 over quota |
 | `POST /api/agents/react` | SSE: `thought`, `tool_call`, `observation`, `answer`, `error` |
 | `POST /api/agents/graph` | SSE as §6.3. Body `{thread_id?, message}` or `{thread_id, resume}` |
 | `GET /api/threads/{id}` | graph thread history |
-| `GET /api/eval/runs?config=current` | runs for the live config |
+| `GET /api/eval/runs?scope=current\|all` | runs for the live config (default) or all, newest first |
 | `GET /api/eval/runs/{id}` | one run with per-query breakdown |
 | `GET /api/config` | live `RetrieverConfig` and hash |
+| `GET /api/articles/{id}` | article text, for the citation dialog |
 | `GET /healthz` | liveness and DB reachability |
 
 ### 7.2 Pages
@@ -199,8 +200,8 @@ route ──simple──► answer_direct (rag.answer) ──► END
 
 ### 7.3 Protection of the public endpoint
 
-- Demo passcode: Lambda environment variable (sensitive Terraform variable from a GitHub secret, KMS-encrypted at rest). Entered once, stored in a signed cookie. Requests without it get 401.
-- Per-session daily request quota (`session_quota`), input length cap, fixed `max_tokens` on every Bedrock call.
+- Demo passcode and cookie-signing key (`VIGILEX_PASSCODE`, `VIGILEX_SECRET_KEY`): Lambda environment variables (sensitive Terraform variables from GitHub secrets, KMS-encrypted at rest). The app refuses to start without both. The passcode is entered once; the session id is kept in an HMAC-signed cookie (stdlib `hmac`; `HttpOnly`, `Secure`, `SameSite=Lax`, 7 days). API requests without it get 401, pages redirect to `/login`.
+- Daily question quotas in `session_quota`: 30 per session and 300 in total (a new login mints a new session, so the global cap is what bounds spend); attempts are counted, including refused ones. Input length cap 1000 characters, fixed `max_tokens` on every Bedrock call.
 - Lambda reserved concurrency = 2.
 - AWS Budgets alarms at €10 and €25, emailed.
 
@@ -234,7 +235,7 @@ Expected idle cost: about €10/month (Bedrock interface endpoint plus Aurora st
 
 ## 10. Local development
 
-- `docker compose up`: Postgres with pgvector, and the API (same Dockerfile as Lambda) with hot reload.
+- `make app`: Postgres with pgvector, migrations, the seed, and the API (same Dockerfile as Lambda) with hot reload on http://localhost:8080. Compose defaults to `VIGILEX_LLM=fake` and `VIGILEX_RERANK=false` so a fresh clone needs no AWS; `make app-bedrock` uses real Bedrock, passing short-lived credentials from `aws configure export-credentials` (mounting `~/.aws` fails with `aws login`, whose provider rewrites its token cache).
 - `make seed` loads the seed subset. `make test`, `make eval`, `make lint` wrap the uv commands.
 - Manual runs call real Bedrock through `AWS_PROFILE`. Tests never do.
 - `VIGILEX_LLM=fake` selects the scripted FakeLLM and the hash-based fake embedder (seed questions and articles use their committed real embeddings).

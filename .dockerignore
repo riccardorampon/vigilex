@@ -1,0 +1,7 @@
+.git
+.venv
+.superpowers
+data
+docs
+tests
+**/__pycache__

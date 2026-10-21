@@ -12,5 +12,30 @@ services:
       interval: 2s
       retries: 15
 
+  api:
+    build: .
+    ports: ["8080:8080"]
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      VIGILEX_DATABASE_URL: postgresql://vigilex:vigilex@db:5432/vigilex
+      VIGILEX_PASSCODE: ${VIGILEX_PASSCODE:-dev}
+      VIGILEX_SECRET_KEY: ${VIGILEX_SECRET_KEY:-dev-only-secret}
+      VIGILEX_LLM: ${VIGILEX_LLM:-fake}
+      VIGILEX_RERANK: ${VIGILEX_RERANK:-false}
+      # real Bedrock mode only (`make app-bedrock` exports short-lived credentials): mounting ~/.aws
+      # would not work with `aws login`, whose provider rewrites its token cache
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      - ./packages:/app/packages            # live code; the venv installs workspace packages editable
+    command: ["uvicorn", "--factory", "vigilex_api.app:create_app", "--host", "0.0.0.0",
+              "--port", "8080", "--reload", "--reload-dir", "/app/packages"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz')"]
+      interval: 2s
+      retries: 30
+
 volumes:
   pgdata: {}
