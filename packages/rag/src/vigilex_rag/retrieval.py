@@ -6,6 +6,8 @@ from typing import Literal
 
 import numpy as np
 import psycopg
+from vigilex_core.embeddings import Embedder
+from vigilex_core.rerank import Reranker
 
 Mode = Literal["bm25", "vector", "hybrid"]
 CHUNKS_PER_ARTICLE = 4  # chunks read per wanted article, so max-per-article still fills n
@@ -79,3 +81,47 @@ def vector_search(
             {"v": np.asarray(query_vector, dtype=np.float32), "chunks": chunks, "n": n},
         ).fetchall()
     return [(r[0], float(r[1])) for r in rows]
+
+
+RERANK_DOC_CHARS = 4000  # Cohere Rerank 3.5 reads ~4k tokens per document; keep requests small
+
+
+@dataclass(frozen=True)
+class ArticleHit:
+    id: int
+    score: float
+    source_act: str
+    path: str
+    text: str
+
+
+def retrieve(
+    conn: psycopg.Connection,
+    query: str,
+    cfg: RetrieverConfig,
+    embedder: Embedder,
+    reranker: Reranker | None = None,
+) -> list[ArticleHit]:
+    if cfg.rerank and reranker is None:
+        raise ValueError(f"config {cfg.name()} needs a reranker")
+    rankings: list[list[int]] = []
+    if cfg.mode in ("bm25", "hybrid"):
+        rankings.append([a for a, _ in bm25_search(conn, query, cfg.candidates)])
+    if cfg.mode in ("vector", "hybrid"):
+        (qv,) = embedder.embed([query], "search_query")
+        rankings.append([a for a, _ in vector_search(conn, qv, cfg.candidates)])
+    fused = rrf(rankings, cfg.rrf_k)[: cfg.candidates]
+    if not fused:
+        return []
+
+    ids = [a for a, _ in fused]
+    rows = conn.execute(
+        "SELECT id, source_act, path, text FROM articles WHERE id = ANY(%s)", (ids,)
+    ).fetchall()
+    by_id = {r[0]: r[1:] for r in rows}
+    if reranker is not None and cfg.rerank:
+        ranked = reranker.rerank(query, [by_id[a][2][:RERANK_DOC_CHARS] for a in ids], cfg.top_k)
+        top = [(ids[i], score) for i, score in ranked]
+    else:
+        top = fused[: cfg.top_k]
+    return [ArticleHit(a, score, *by_id[a]) for a, score in top]
