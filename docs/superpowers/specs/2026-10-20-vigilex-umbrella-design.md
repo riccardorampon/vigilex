@@ -275,6 +275,7 @@ Each step gets its own implementation plan and ends deployable.
 5. **Graph agent** with memory and interrupts, wired into API and UI.
 6. **Eval layer 2** (judge) and its validation.
 7. Later: React SPA replacing the htmx UI.
+8. Later (decided 2026-10-21): true Okapi BM25 in SQL for the keyword ranking (precomputed document length + document-frequency table refreshed after ingest). Seed prototype: keyword recall@10 0.159 vs 0.120 for `ts_rank`, hybrid 0.189 vs 0.153. Deferred because rerank already lifts hybrid to 0.303; step 3 deploys `hybrid+rerank` as the default config.
 
 ## 13. To verify before or during step 1
 
