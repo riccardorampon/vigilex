@@ -201,6 +201,8 @@ route ──simple──► answer_direct (rag.answer) ──► END
 ### 7.3 Protection of the public endpoint
 
 - Demo passcode and cookie-signing key (`VIGILEX_PASSCODE`, `VIGILEX_SECRET_KEY`): Lambda environment variables (sensitive Terraform variables from GitHub secrets, KMS-encrypted at rest). The app refuses to start without both. The passcode is entered once; the session id is kept in an HMAC-signed cookie (stdlib `hmac`; `HttpOnly`, `Secure`, `SameSite=Lax`, 7 days). API requests without it get 401, pages redirect to `/login`.
+- The app refuses to start with a passcode under 16 characters or a signing key under 32 bytes (there is no login throttling, so length is the guessing defence); only local compose sets `VIGILEX_INSECURE_DEV=1` to allow its `dev` defaults, and binds its ports to 127.0.0.1.
+- `GET /api/rag/answer` refuses requests whose `Sec-Fetch-Site` is not `same-origin` (403): `SameSite=Lax` cookies still travel on cross-site top-level navigations, which would let any page spend a visitor's quota.
 - Daily question quotas in `session_quota`: 30 per session and 300 in total (a new login mints a new session, so the global cap is what bounds spend); attempts are counted, including refused ones. Input length cap 1000 characters, fixed `max_tokens` on every Bedrock call.
 - Lambda reserved concurrency = 2.
 - AWS Budgets alarms at €10 and €25, emailed.

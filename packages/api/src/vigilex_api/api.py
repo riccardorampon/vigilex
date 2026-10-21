@@ -52,6 +52,10 @@ STREAM_HEADERS = {"Cache-Control": "no-store", "X-Accel-Buffering": "no"}
 def rag_answer(
     q: str, request: Request, session_id: str = Depends(require_session)
 ) -> StreamingResponse:
+    # SameSite=Lax still sends the cookie on cross-site top-level navigations, so a link elsewhere
+    # could spend the visitor's quota and Bedrock calls. EventSource sends same-origin.
+    if request.headers.get("sec-fetch-site", "same-origin") != "same-origin":
+        raise HTTPException(status_code=403, detail="cross-site request refused")
     st = state(request)
     if len(q) > st.config.max_question_chars:
         raise HTTPException(

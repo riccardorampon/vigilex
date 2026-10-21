@@ -75,3 +75,13 @@ def test_failure_mid_stream_sends_error_event(client, conn, tmp_path, write_rele
     events = frames(client.get("/api/rag/answer", params={"q": "verifica"}).text)
     assert [n for n, _ in events] == ["hits", "error"]
     assert "secret internals" not in json.dumps(events)
+
+
+def test_cross_site_navigation_is_refused_before_any_cost(client, conn):
+    login(client)
+    cross = {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "navigate"}
+    r = client.get("/api/rag/answer", params={"q": "verifica"}, headers=cross)
+    assert r.status_code == 403
+    assert conn.execute("SELECT count(*) FROM session_quota").fetchone()[0] == 0
+    same = {"Sec-Fetch-Site": "same-origin"}
+    assert client.get("/api/rag/answer", params={"q": "  "}, headers=same).status_code == 200

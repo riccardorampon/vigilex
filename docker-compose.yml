@@ -5,7 +5,7 @@ services:
       POSTGRES_USER: vigilex
       POSTGRES_PASSWORD: vigilex
       POSTGRES_DB: vigilex
-    ports: ["5432:5432"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vigilex"]
@@ -14,7 +14,7 @@ services:
 
   api:
     build: .
-    ports: ["8080:8080"]
+    ports: ["127.0.0.1:8080:8080"]  # never the LAN: in Bedrock mode it spends your AWS credentials
     depends_on:
       db: { condition: service_healthy }
     environment:
@@ -23,6 +23,7 @@ services:
       VIGILEX_SECRET_KEY: ${VIGILEX_SECRET_KEY:-dev-only-secret}
       VIGILEX_LLM: ${VIGILEX_LLM:-fake}
       VIGILEX_RERANK: ${VIGILEX_RERANK:-false}
+      VIGILEX_INSECURE_DEV: "1"  # allows the short dev passcode/key; never set it in AWS
       # real Bedrock mode only (`make app-bedrock` exports short-lived credentials): mounting ~/.aws
       # would not work with `aws login`, whose provider rewrites its token cache
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
